@@ -1,5 +1,3 @@
-# StockTrendAnalysis
-A simple tool to analyze stock trends.
 # Stock Analysis Tool
 A simple tool that analyzes stock. It includes visuals, calculations, vocabulary assistance, and generates reports. 
 
