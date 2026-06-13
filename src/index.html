@@ -10,10 +10,10 @@
     <div class="app-shell">
       <aside class="sidebar" aria-label="Analysis sections">
         <div class="brand">
-          <div class="mark">HA</div>
+          <img src="../images/logo.png" alt="SUNY New Paltz logo" class="mark" style="width: 40px; height: 40px; border-radius: 8px; object-fit: cover;" />
           <div>
-            <strong>Hawk Analysis</strong>
-            <span>Stock research desk</span>
+            <strong>Hawk Fund</strong>
+            <span>Stock analysis dashboard</span>
           </div>
         </div>
         <nav>
@@ -22,6 +22,7 @@
           <a href="#fundamental">Fundamental</a>
           <a href="#technical">Technical</a>
           <a href="#report">Report</a>
+          <a href="#history">History</a>
         </nav>
       </aside>
 
@@ -151,16 +152,29 @@
           <div class="section-head">
             <div>
               <p class="eyebrow">4. Report generator</p>
-              <h2>Creates a Word-compatible report modeled on the attached Hawk Report.</h2>
+              <h2>Creates a DOCX report modeled on the attached Hawk Report.</h2>
             </div>
             <div class="action-row">
-              <button id="download-report" disabled>Download DOCX Report</button>
+              <button id="download-report" disabled>Save DOCX Report</button>
               <button id="print-report" class="secondary" disabled>Print / Save PDF</button>
             </div>
           </div>
+          <p id="save-status" class="muted">Saved desktop reports are tracked in SQLite history.</p>
           <div id="report-preview" class="report-preview">
             <p class="muted">Enter a ticker and click Analyze to generate a report.</p>
           </div>
+        </section>
+
+        <section id="history" class="section-band history-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">5. Report history</p>
+              <h2>Open previous DOCX reports in Microsoft Word, Google Docs workflows, or another editor.</h2>
+            </div>
+            <button id="refresh-history" class="secondary">Refresh</button>
+          </div>
+          <p id="history-status" class="muted">Desktop history uses a local SQLite database. In the browser preview, reports can still be downloaded.</p>
+          <div id="history-list" class="history-list"></div>
         </section>
       </main>
     </div>

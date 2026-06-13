@@ -399,7 +399,8 @@ canvas {
   flex-wrap: wrap;
 }
 
-.report-preview {
+.report-preview,
+.history-list {
   padding: 24px;
   max-height: 540px;
   overflow: auto;
@@ -409,6 +410,36 @@ canvas {
   margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
+}
+
+.history-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.history-item strong,
+.history-item span {
+  display: block;
+}
+
+.history-item span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 dialog {
@@ -443,8 +474,7 @@ dialog::backdrop {
   }
 
   nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));  }
 
   .toolbar,
   .chart-grid,

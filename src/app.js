@@ -407,11 +407,16 @@ function render() {
   drawAllCharts();
   renderReport();
   setReportActions(true);
+  loadReportHistory();
 }
 
 function setReportActions(enabled) {
   el("download-report").disabled = !enabled;
   el("print-report").disabled = !enabled;
+}
+
+function hasDesktopHistory() {
+  return Boolean(window.hawkReports);
 }
 
 function renderCards() {
@@ -592,15 +597,73 @@ function renderReport() {
   el("report-preview").innerHTML = html;
 }
 
-function downloadReport() {
+async function downloadReport() {
   if (!state) return;
-  const blob = new Blob([buildDocx()], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  const bytes = buildDocx();
+
+  if (hasDesktopHistory()) {
+    setText("save-status", "Saving DOCX report to SQLite history...");
+    const result = await window.hawkReports.save({
+      ticker: state.ticker,
+      company: state.profile.company,
+      rating: state.rating,
+      score: state.score,
+      bytes: Array.from(bytes)
+    });
+    if (result.ok) {
+      setText("save-status", `Saved to history: ${result.reportPath}`);
+      await loadReportHistory();
+    } else {
+      setText("save-status", result.error || "Could not save the report to history.");
+    }
+    return;
+  }
+
+  downloadDocxBytes(bytes, `${state.ticker}-Hawk-Report.docx`);
+  setText("save-status", "Browser preview downloaded the DOCX. SQLite history is available in the Electron desktop app.");
+}
+
+function downloadDocxBytes(bytes, fileName) {
+  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${state.ticker}-Hawk-Report.docx`;
+  a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function loadReportHistory() {
+  const list = el("history-list");
+  if (!list) return;
+
+  if (!hasDesktopHistory()) {
+    setText("history-status", "SQLite history is active in the Electron desktop app. Browser preview mode can download DOCX reports but cannot write to SQLite.");
+    list.innerHTML = "";
+    return;
+  }
+
+  const result = await window.hawkReports.list();
+  if (!result.ok) {
+    setText("history-status", result.error || "Could not load report history.");
+    list.innerHTML = "";
+    return;
+  }
+
+  setText("history-status", result.reports.length ? "Saved DOCX reports are listed below. Open uses your system default editor for .docx files." : "No saved reports yet.");
+  list.innerHTML = result.reports.map((report) => `
+    <article class="history-item">
+      <div>
+        <strong>${report.company} (${report.ticker})</strong>
+        <span>${report.rating} | Score ${report.score}/100 | ${new Date(report.created_at).toLocaleString()}</span>
+        <span>${report.report_path}</span>
+      </div>
+      <div class="action-row">
+        <button data-open-report="${report.report_path}">Open</button>
+        <button class="secondary" data-reveal-report="${report.report_path}">Show File</button>
+      </div>
+    </article>
+  `).join("");
 }
 
 function reportBlocks() {
