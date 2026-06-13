@@ -1,0 +1,32 @@
+{
+  "name": "hawk-stock-analysis",
+  "version": "0.1.0",
+  "description": "Beginner-friendly stock analysis desktop app scaffold for Windows and macOS.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev:web": "python3 -m http.server 4173",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "edu.hawk.stockanalysis",
+    "productName": "Hawk Stock Analysis",
+    "files": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      "main.js"
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

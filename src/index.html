@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hawk Stock Analysis</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Analysis sections">
+        <div class="brand">
+          <div class="mark">HA</div>
+          <div>
+            <strong>Hawk Analysis</strong>
+            <span>Stock research desk</span>
+          </div>
+        </div>
+        <nav>
+          <a href="#overview">Overview</a>
+          <a href="#quant">Quantitative</a>
+          <a href="#fundamental">Fundamental</a>
+          <a href="#technical">Technical</a>
+          <a href="#report">Report</a>
+        </nav>
+      </aside>
+
+      <main>
+        <section class="toolbar" id="overview">
+          <div>
+            <p class="eyebrow">Beginner-friendly stock analysis</p>
+            <h1>Analyze a stock, understand the math, export a report.</h1>
+          </div>
+          <form id="stock-form" class="search-panel">
+            <label for="ticker">Ticker</label>
+            <div class="search-row">
+              <input id="ticker" name="ticker" placeholder="Enter ticker, e.g. TSLA" autocomplete="off" required />
+              <button type="submit">Analyze</button>
+            </div>
+            <p id="data-source" class="muted">Enter any stock ticker symbol to generate an analysis.</p>
+          </form>
+        </section>
+
+        <section class="summary-grid" aria-live="polite">
+          <article class="summary-panel wide">
+            <p class="eyebrow">Current recommendation</p>
+            <div class="recommendation">
+              <div>
+                <h2 id="company-name">Enter a ticker to begin</h2>
+                <p id="company-description">The app will analyze the stock symbol you enter and generate charts, beginner explanations, and a DOCX report.</p>
+              </div>
+              <div class="score-ring">
+                <span id="score">--</span>
+                <small id="rating">Pending</small>
+              </div>
+            </div>
+          </article>
+          <article class="metric-card">
+            <span>5-year return</span>
+            <strong id="metric-return">--</strong>
+            <button class="info" data-topic="return">?</button>
+          </article>
+          <article class="metric-card">
+            <span>Volatility</span>
+            <strong id="metric-vol">--</strong>
+            <button class="info" data-topic="volatility">?</button>
+          </article>
+          <article class="metric-card">
+            <span>CAPM beta</span>
+            <strong id="metric-beta">--</strong>
+            <button class="info" data-topic="beta">?</button>
+          </article>
+          <article class="metric-card">
+            <span>RSI</span>
+            <strong id="metric-rsi">--</strong>
+            <button class="info" data-topic="rsi">?</button>
+          </article>
+        </section>
+
+        <section id="quant" class="section-band">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">1. Quantitative analysis</p>
+              <h2>Risk, return, market relationship, and efficiency</h2>
+            </div>
+            <div class="legend"><span class="stock-dot"></span> Stock <span class="market-dot"></span> S&P 500 / SPY</div>
+          </div>
+          <div class="chart-grid">
+            <article class="chart-panel span-2">
+              <div class="chart-title">
+                <h3>Price and moving averages</h3>
+                <button class="label-chip" data-topic="sma">SMA labels</button>
+              </div>
+              <canvas id="price-chart" height="280"></canvas>
+            </article>
+            <article class="chart-panel">
+              <div class="chart-title">
+                <h3>Return comparison</h3>
+                <button class="label-chip" data-topic="return">Return</button>
+              </div>
+              <canvas id="return-chart" height="280"></canvas>
+            </article>
+            <article class="chart-panel">
+              <div class="chart-title">
+                <h3>CAPM relationship</h3>
+                <button class="label-chip" data-topic="capm">Beta</button>
+              </div>
+              <canvas id="scatter-chart" height="280"></canvas>
+            </article>
+          </div>
+          <div class="explain-grid" id="quant-copy"></div>
+        </section>
+
+        <section id="fundamental" class="section-band">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">2. Fundamental analysis</p>
+              <h2>Financial strength, profitability, growth, valuation, and credit risk</h2>
+            </div>
+          </div>
+          <div class="ratio-grid" id="ratio-grid"></div>
+          <div class="chart-grid">
+            <article class="chart-panel">
+              <div class="chart-title">
+                <h3>Valuation signals</h3>
+                <button class="label-chip" data-topic="peg">PEG</button>
+              </div>
+              <canvas id="valuation-chart" height="260"></canvas>
+            </article>
+            <article class="chart-panel">
+              <div class="chart-title">
+                <h3>Bond yield spreads</h3>
+                <button class="label-chip" data-topic="spread">Spread</button>
+              </div>
+              <canvas id="spread-chart" height="260"></canvas>
+            </article>
+          </div>
+        </section>
+
+        <section id="technical" class="section-band">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">3. Technical analysis</p>
+              <h2>Trend, momentum, support, resistance, and volume</h2>
+            </div>
+          </div>
+          <div class="technical-grid" id="technical-grid"></div>
+        </section>
+
+        <section id="report" class="section-band report-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">4. Report generator</p>
+              <h2>Creates a Word-compatible report modeled on the attached Hawk Report.</h2>
+            </div>
+            <div class="action-row">
+              <button id="download-report" disabled>Download DOCX Report</button>
+              <button id="print-report" class="secondary" disabled>Print / Save PDF</button>
+            </div>
+          </div>
+          <div id="report-preview" class="report-preview">
+            <p class="muted">Enter a ticker and click Analyze to generate a report.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="info-modal">
+      <button class="close-modal" aria-label="Close">x</button>
+      <h3 id="modal-title"></h3>
+      <p id="modal-body"></p>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
