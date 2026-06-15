@@ -43,6 +43,8 @@ const NEWSDATA_KEY = "hawk_newsdata_key";
 const UNSPLASH_KEY = "hawk_unsplash_key";
 const OPENAI_KEY = "hawk_openai_key";
 const OPENAI_MODEL = "hawk_openai_model";
+const GOOGLE_SEARCH_KEY = "hawk_google_search_key";
+const GOOGLE_SEARCH_CX = "hawk_google_search_cx";
 const SHOW_TICKER_HISTORY = "hawk_show_ticker_history";
 const RECENT_TICKERS = "hawk_recent_tickers";
 const NEWS_REFRESH_MINUTES = "hawk_news_refresh_minutes";
@@ -176,6 +178,7 @@ let companyDirectoryPromise = null;
 const el = (id) => document.getElementById(id);
 const pct = (n, d = 1) => `${Number(n).toFixed(d)}%`;
 const money = (n) => `$${Number(n).toFixed(2)}`;
+const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 
 function seeded(seed) {
   let value = seed * 9973;
@@ -219,6 +222,7 @@ function profileFor(ticker) {
     company: `${ticker} Corporation`,
     description: `${ticker} is analyzed with an educational generated profile because exact company reference data is not connected yet. The dashboard estimates business mix, risk, profitability, valuation, and technical signals from available price data and seeded fundamentals. For a final investment decision, users should verify the company name, filings, competitors, and ratios with a licensed market-data provider.`,
     competitors: ["Primary peer 1", "Primary peer 2", "Primary peer 3"],
+    generatedProfile: true,
     revenue: [
       ["Core operations", 72],
       ["Growth segment", 22],
@@ -258,6 +262,11 @@ function profileFor(ticker) {
 
 async function loadTickerData(ticker) {
   const profile = profileFor(ticker);
+  const yahooProfile = await fetchYahooSearchProfile(ticker).catch((error) => {
+    console.info("Yahoo Finance symbol lookup unavailable; using fallback profile name.", error);
+    return null;
+  });
+  if (yahooProfile) applyYahooSearchProfile(profile, yahooProfile, ticker);
   await enrichProfileFromDirectory(profile, ticker);
   const generated = createSeries(profile, ticker);
   const alphaKey = localStorage.getItem(ALPHA_VANTAGE_KEY);
@@ -269,6 +278,7 @@ async function loadTickerData(ticker) {
       alphaKey ? fetchAlphaOverview(ticker, alphaKey).catch(() => null) : Promise.resolve(null)
     ]);
     if (overview) applyAlphaOverview(profile, overview, ticker);
+    await enrichCompetitorsFromGoogle(profile, ticker);
     const stock = stockChart.prices;
     const market = marketChart.prices.slice(-stock.length);
     if (stock.length > 24 && market.length > 24) {
@@ -283,6 +293,7 @@ async function loadTickerData(ticker) {
     }
   } catch (error) {
     console.info("Yahoo Finance data unavailable; using generated data.", error);
+    await enrichCompetitorsFromGoogle(profile, ticker);
     return {
       profile,
       prices: generated,
@@ -291,11 +302,12 @@ async function loadTickerData(ticker) {
     };
   }
 
+  await enrichCompetitorsFromGoogle(profile, ticker);
   return { profile, prices: generated, yahoo: null, source: "Yahoo Finance returned too little price history. Showing generated educational data." };
 }
 
 async function enrichProfileFromDirectory(profile, ticker) {
-  if (PROFILES[ticker]) return;
+  if (PROFILES[ticker] || profile.nameSource === "Yahoo Finance") return;
   const match = await findCompanyDirectoryEntry(ticker);
   if (!match) return;
   profile.company = match.name;
@@ -350,23 +362,71 @@ async function fetchJsonWithTimeout(url, timeoutMs = 8000, options = {}) {
 
 
 async function fetchYahooChart(ticker) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5y&interval=1mo&events=div%2Csplits`;
+  const yahooSymbol = normalizeYahooSymbol(ticker);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=5y&interval=1mo&events=div%2Csplits`;
   const data = await fetchJsonWithTimeout(url, 9000);
   const result = data.chart?.result?.[0];
   if (!result) throw new Error(data.chart?.error?.description || "Yahoo Finance chart data was not returned.");
   const timestamps = result.timestamp || [];
   const close = result.indicators?.quote?.[0]?.close || [];
-  const prices = close.map(Number).filter((value) => Number.isFinite(value));
-  const labels = timestamps.slice(-prices.length).map((stamp) => new Date(stamp * 1000).toLocaleDateString(undefined, { month: "short", year: "2-digit" }));
+  const points = timestamps
+    .map((stamp, index) => ({ stamp, close: Number(close[index]) }))
+    .filter((point) => Number.isFinite(point.stamp) && Number.isFinite(point.close))
+    .slice(-61);
+  const prices = points.map((point) => point.close);
+  const labels = points.map((point) => new Date(point.stamp * 1000).toLocaleDateString(undefined, { month: "short", year: "2-digit" }));
   const quote = Number(result.meta?.regularMarketPrice);
   if (Number.isFinite(quote) && prices.length) prices[prices.length - 1] = quote;
   return {
-    prices: prices.slice(-61),
-    labels: labels.slice(-61),
+    prices,
+    labels,
     quote: Number.isFinite(quote) ? quote : prices.at(-1),
     currency: result.meta?.currency || "USD",
-    yahooUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/chart/`
+    yahooUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}/chart/`
   };
+}
+
+async function fetchYahooSearchProfile(ticker) {
+  const yahooSymbol = normalizeYahooSymbol(ticker);
+  const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(yahooSymbol)}&quotesCount=8&newsCount=0`;
+  const data = await fetchJsonWithTimeout(url, 7000);
+  const quotes = data.quotes || [];
+  const normalizedTicker = yahooSymbol;
+  const quote = quotes.find((item) => normalizeYahooSymbol(item.symbol) === normalizedTicker);
+  if (!quote) return null;
+  const name = quote.longname || quote.shortname || quote.displayName || quote.name;
+  return name ? {
+    name,
+    symbol: quote.symbol,
+    quoteType: quote.quoteType || quote.typeDisp || "",
+    exchange: quote.exchDisp || quote.exchange || ""
+  } : null;
+}
+
+function normalizeYahooSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\./g, "-");
+}
+
+function applyYahooSearchProfile(profile, yahooProfile, ticker) {
+  const name = cleanSecurityName(yahooProfile.name);
+  if (!name) return;
+  profile.company = name;
+  profile.nameSource = "Yahoo Finance";
+  profile.instrumentType = yahooProfile.quoteType || profile.instrumentType || "security";
+  if (profile.generatedProfile || /analyzed with an educational generated profile/i.test(profile.description)) {
+    const type = yahooProfile.quoteType && yahooProfile.quoteType !== "EQUITY" ? yahooProfile.quoteType.toLowerCase().replace(/_/g, " ") : "security";
+    profile.description = `${name} (${ticker}) is a ${type} identified through Yahoo Finance symbol lookup. The dashboard analyzes price trend, risk, valuation-style signals, momentum, and report context using the data sources configured in Settings. For a final investment decision, users should verify holdings, fees, filings, and peer comparisons with official issuer and market-data sources.`;
+  }
+}
+
+function cleanSecurityName(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+-\s+Yahoo Finance$/i, "")
+    .trim();
 }
 
 async function fetchAlphaMonthlySeries(ticker, apiKey) {
@@ -393,6 +453,111 @@ async function fetchAlphaOverview(ticker, apiKey) {
   return fetchJsonWithTimeout(url);
 }
 
+async function enrichCompetitorsFromGoogle(profile, ticker) {
+  const key = localStorage.getItem(GOOGLE_SEARCH_KEY);
+  const cx = localStorage.getItem(GOOGLE_SEARCH_CX);
+  if (!key || !cx) return;
+
+  try {
+    const query = `${profile.company} ${ticker} stock top competitors`;
+    const url = `https://customsearch.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&q=${encodeURIComponent(query)}&num=6&gl=us&hl=en&dateRestrict=y2`;
+    const data = await fetchJsonWithTimeout(url, 9000);
+    const results = (data.items || []).slice(0, 6).map((item) => ({
+      title: stripTags(item.title || ""),
+      snippet: stripTags(item.snippet || ""),
+      link: item.link || ""
+    }));
+    const names = extractCompetitorNames(results, ticker, profile.company);
+    if (names.length) {
+      profile.competitors = names.slice(0, 3);
+      profile.competitorSource = "Google Programmable Search";
+      profile.competitorResearch = results.slice(0, 3);
+    }
+  } catch (error) {
+    console.info("Google competitor research unavailable.", error);
+  }
+}
+
+function stripTags(value) {
+  const template = document.createElement("template");
+  template.innerHTML = String(value);
+  return template.content.textContent || "";
+}
+
+function extractCompetitorNames(results, ticker, companyName) {
+  const text = results.map((item) => `${item.title}. ${item.snippet}`).join(" ");
+  const blocked = new Set([
+    String(ticker).toLowerCase(),
+    String(ticker).toUpperCase(),
+    "stock",
+    "stocks",
+    "competitors",
+    "alternatives",
+    "marketbeat",
+    "yahoo",
+    "finance",
+    "nasdaq",
+    "motley",
+    "fool",
+    "zacks",
+    "google",
+    "search"
+  ]);
+  String(companyName).split(/\s+/).forEach((part) => blocked.add(part.toLowerCase().replace(/[^a-z0-9]/g, "")));
+
+  const candidates = [];
+  const competitorSections = [...text.matchAll(/(?:competitors|alternatives|peers)(?:\s+(?:include|are|such as))?\s*[:\-]?\s*([^.;]+)/gi)];
+  competitorSections.forEach((match) => {
+    match[1]
+      .split(/,| and | vs\.? | versus |\/|\|/i)
+      .map(cleanCompetitorName)
+      .filter(Boolean)
+      .forEach((name) => candidates.push(name));
+  });
+
+  const namePattern = /\b([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,3}(?:\s+(?:Inc|Corp|Corporation|Company|PLC|Ltd|Limited|Platforms|Technologies|Systems|Group|Holdings|Software|Semiconductor|Electronics|Pharmaceuticals|Bancorp|Bank))?)\b/g;
+  [...text.matchAll(namePattern)]
+    .map((match) => cleanCompetitorName(match[1]))
+    .filter(Boolean)
+    .forEach((name) => candidates.push(name));
+
+  const tickerBlocks = new Set([
+    String(ticker).toUpperCase(),
+    "ETF",
+    "NYSE",
+    "NASDAQ",
+    "AMEX",
+    "USD",
+    "CEO",
+    "CFO",
+    "SEC",
+    "IPO",
+    "EPS",
+    "PE",
+    "ETFDB"
+  ]);
+  [...text.matchAll(/\b[A-Z]{2,5}\b/g)]
+    .map((match) => match[0])
+    .filter((symbol) => !tickerBlocks.has(symbol))
+    .forEach((symbol) => candidates.push(symbol));
+
+  return [...new Set(candidates)]
+    .filter((name) => {
+      const compact = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return compact.length > 2 && !blocked.has(compact) && !blocked.has(name.toLowerCase());
+    })
+    .slice(0, 3);
+}
+
+function cleanCompetitorName(value) {
+  return String(value || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(?:NYSE|NASDAQ|Nasdaq|Stock|Stocks|Ticker|Quote|Inc\.?|Corp\.?)\b/g, "")
+    .replace(/^[^A-Za-z]+|[^A-Za-z0-9.&' -]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function mergeLatestQuote(monthly, quote) {
   const prices = monthly.slice(-61);
   if (quote && Number.isFinite(quote) && prices.length) prices[prices.length - 1] = quote;
@@ -411,10 +576,8 @@ function alphaPercent(value) {
 
 function applyAlphaOverview(profile, overview, ticker) {
   if (!overview || Object.keys(overview).length === 0) return;
-  profile.company = overview.Name || profile.company || `${ticker} Corporation`;
+  if (profile.nameSource !== "Yahoo Finance") profile.company = overview.Name || profile.company || `${ticker} Corporation`;
   if (overview.Description) profile.description = overview.Description;
-  const peerHints = [overview.Sector, overview.Industry].filter(Boolean);
-  if (peerHints.length) profile.competitors = peerHints;
   const ratios = profile.ratios;
   ratios.netMargin = alphaPercent(overview.ProfitMargin) ?? ratios.netMargin;
   ratios.roa = alphaPercent(overview.ReturnOnAssetsTTM) ?? ratios.roa;
@@ -481,6 +644,85 @@ function ar1Coefficient(values) {
   return covariance(current, lag) / variance(lag);
 }
 
+function scoreHigher(value, weak, strong) {
+  return clamp(((value - weak) / (strong - weak)) * 100);
+}
+
+function scoreLower(value, strong, weak) {
+  return clamp(((weak - value) / (weak - strong)) * 100);
+}
+
+function scoreIdeal(value, low, high, tolerance) {
+  if (value >= low && value <= high) return 100;
+  if (value < low) return clamp(100 - ((low - value) / tolerance) * 100);
+  return clamp(100 - ((value - high) / tolerance) * 100);
+}
+
+function weightedScore(parts) {
+  const totalWeight = parts.reduce((sum, part) => sum + part.weight, 0);
+  return parts.reduce((sum, part) => sum + clamp(part.score) * part.weight, 0) / totalWeight;
+}
+
+function calculateRatingScore(metrics) {
+  const r = metrics.ratios;
+  const trendAboveShort = metrics.currentPrice > metrics.sma10;
+  const trendAboveLong = metrics.currentPrice > metrics.sma50;
+  const range = metrics.resistance - metrics.support;
+  const rangePosition = range > 0 ? ((metrics.currentPrice - metrics.support) / range) * 100 : 50;
+
+  const performance = weightedScore([
+    { score: scoreHigher(metrics.stockReturn - metrics.marketReturn, -30, 45), weight: 0.6 },
+    { score: scoreHigher(metrics.stockReturn, -20, 85), weight: 0.4 }
+  ]);
+  const risk = weightedScore([
+    { score: scoreLower(metrics.volatility, 9, 28), weight: 0.35 },
+    { score: scoreHigher(metrics.marketVol - metrics.volatility, -12, 8), weight: 0.25 },
+    { score: scoreIdeal(metrics.beta, 0.75, 1.25, 1.1), weight: 0.25 },
+    { score: scoreIdeal(Math.abs(metrics.corr), 0.25, 0.85, 0.45), weight: 0.15 }
+  ]);
+  const fundamentals = weightedScore([
+    { score: scoreIdeal(r.currentRatio, 1.2, 3.0, 1.4), weight: 0.11 },
+    { score: scoreLower(r.debtEquity, 0.35, 1.8), weight: 0.12 },
+    { score: scoreLower(r.ltDebtEquity, 0.3, 1.6), weight: 0.08 },
+    { score: scoreHigher(r.netMargin, 4, 32), weight: 0.13 },
+    { score: scoreHigher(r.roa, 3, 22), weight: 0.1 },
+    { score: scoreHigher(r.roe, 8, 40), weight: 0.1 },
+    { score: scoreHigher(r.epsGrowth, -5, 28), weight: 0.1 },
+    { score: scoreHigher(r.revenueGrowth, -2, 24), weight: 0.1 },
+    { score: scoreLower(r.peg, 0.8, 3.2), weight: 0.1 },
+    { score: scoreIdeal(r.pe, 12, 32, 34), weight: 0.06 }
+  ]);
+  const technical = weightedScore([
+    { score: scoreIdeal(metrics.rsi, 42, 66, 36), weight: 0.35 },
+    { score: trendAboveShort && trendAboveLong ? 100 : trendAboveShort || trendAboveLong ? 62 : 32, weight: 0.35 },
+    { score: scoreIdeal(rangePosition, 50, 86, 50), weight: 0.2 },
+    { score: metrics.currentPrice >= metrics.support ? 80 : 35, weight: 0.1 }
+  ]);
+  const efficiency = weightedScore([
+    { score: scoreLower(Math.abs(metrics.ar1), 0.08, 0.55), weight: 0.55 },
+    { score: scoreIdeal(metrics.adjR2, 0.18, 0.72, 0.5), weight: 0.45 }
+  ]);
+
+  const score = Math.round(weightedScore([
+    { score: performance, weight: 0.24 },
+    { score: risk, weight: 0.18 },
+    { score: fundamentals, weight: 0.32 },
+    { score: technical, weight: 0.18 },
+    { score: efficiency, weight: 0.08 }
+  ]));
+
+  return {
+    score: clamp(score),
+    breakdown: {
+      performance: Math.round(performance),
+      risk: Math.round(risk),
+      fundamentals: Math.round(fundamentals),
+      technical: Math.round(technical),
+      efficiency: Math.round(efficiency)
+    }
+  };
+}
+
 function analyze(profile, prices, ticker, source) {
   const stockReturns = returns(prices.stock);
   const marketReturns = returns(prices.market);
@@ -500,16 +742,25 @@ function analyze(profile, prices, ticker, source) {
   const resistance = Math.max(...prices.stock.slice(-12));
   const ar1 = ar1Coefficient(stockReturns);
   const ratios = profile.ratios;
-
-  let score = 50;
-  score += stockReturn > marketReturn ? 12 : -5;
-  score += volatility < 12 ? 6 : volatility > 20 ? -8 : 2;
-  score += ratios.currentRatio > 1 ? 6 : -8;
-  score += ratios.debtEquity < 0.8 ? 7 : -6;
-  score += ratios.netMargin > 15 ? 8 : 0;
-  score += ratios.peg < 1 ? 9 : ratios.peg < 2 ? 3 : -7;
-  score += rsiValue > 70 ? -4 : rsiValue < 30 ? 2 : 3;
-  score = Math.max(0, Math.min(100, Math.round(score)));
+  const adjR2 = adjustedR2(corr, stockReturns.length);
+  const ratingResult = calculateRatingScore({
+    stockReturn,
+    marketReturn,
+    volatility,
+    marketVol,
+    beta,
+    corr,
+    adjR2,
+    ar1,
+    rsi: rsiValue,
+    currentPrice: last,
+    sma10: sma10.at(-1),
+    sma50: sma50.at(-1),
+    support,
+    resistance,
+    ratios
+  });
+  const score = ratingResult.score;
   const rating = score >= 72 ? "Positive" : score >= 55 ? "Neutral" : "Cautious";
 
   return {
@@ -528,7 +779,7 @@ function analyze(profile, prices, ticker, source) {
     marketVol,
     corr,
     beta,
-    adjR2: adjustedR2(corr, stockReturns.length),
+    adjR2,
     ar1,
     weakForm: Math.abs(ar1) < 0.28,
     rsi: rsiValue,
@@ -538,7 +789,8 @@ function analyze(profile, prices, ticker, source) {
     support,
     resistance,
     score,
-    rating
+    rating,
+    scoreBreakdown: ratingResult.breakdown
   };
 }
 
@@ -547,10 +799,9 @@ function setText(id, value) {
 }
 
 function render() {
-  setText("company-name", `${state.profile.company} (${state.ticker})`);
-  setText("company-description", state.profile.description);
-  setText("company-overview", threeSentenceOverview(state.profile.description));
-  setText("competitors", `Top competitors: ${state.profile.competitors.join(", ")}.`);
+  setText("company-name", state.profile.company);
+  setText("company-description", threeSentenceOverview(state.profile.description));
+  renderCompetitors();
   setText("score", state.score);
   setText("rating", state.rating);
   setText("metric-return", pct(state.stockReturn));
@@ -586,12 +837,39 @@ function threeSentenceOverview(description) {
   return sentences.slice(0, 3).join(" ").trim();
 }
 
+function competitorNames(competitors = []) {
+  return competitors
+    .map((item) => typeof item === "string" ? item : item.name)
+    .filter(Boolean)
+    .filter((name) => !/^Primary peer \d+$/i.test(name))
+    .slice(0, 3);
+}
+
+function renderCompetitors() {
+  const names = competitorNames(state.profile.competitors);
+  if (!names.length) {
+    const message = localStorage.getItem(GOOGLE_SEARCH_KEY) && localStorage.getItem(GOOGLE_SEARCH_CX)
+      ? "Top competitors: Google competitor research did not return clear peer names for this ticker yet."
+      : "Top competitors: Add a Google Search API key and Search Engine ID in Settings to research ticker competitors.";
+    el("competitors").textContent = message;
+    return;
+  }
+  const source = state.profile.competitorSource ? ` <span class="competitor-source">Source: ${xmlEscape(state.profile.competitorSource)}.</span>` : "";
+  const research = (state.profile.competitorResearch || [])
+    .slice(0, 3)
+    .filter((item) => item.link && item.title)
+    .map((item) => `<a href="${xmlEscape(item.link)}" target="_blank" rel="noreferrer">${xmlEscape(item.title)}</a>`)
+    .join(" ");
+  const links = research ? `<span class="competitor-source">Research links: ${research}</span>` : "";
+  el("competitors").innerHTML = `Top competitors: ${names.map(xmlEscape).join(", ")}.${source}${links}`;
+}
+
 function renderCards() {
   el("quant-copy").innerHTML = [
     ["Market comparison", `${state.ticker} returned ${pct(state.stockReturn)} versus ${pct(state.marketReturn)} for the market proxy. This shows whether the stock rewarded investors more or less than broad market exposure.`],
     ["Risk profile", `Monthly volatility is ${pct(state.volatility)}, compared with ${pct(state.marketVol)} for the market proxy. This is the risk side of the return story.`],
     ["Efficiency check", `The AR(1) estimate is ${state.ar1.toFixed(2)}. ${state.weakForm ? "Past monthly returns do not look strongly predictive, which supports weak-form efficiency." : "Past monthly returns show some persistence, so the app flags this for further testing."}`]
-  ].map(copyCard).join("");
+  ].map(copyTextCard).join("");
 
   const ratios = [
     ["Current ratio", state.profile.ratios.currentRatio.toFixed(2), state.profile.ratios.currentRatio > 1 ? "Healthy short-term liquidity." : "Short-term liquidity needs attention."],
@@ -616,6 +894,10 @@ function renderCards() {
 
 function copyCard([label, value, body], className = "technical-card") {
   return `<article class="${className}"><small>${label}</small><strong>${value}</strong><p>${body}</p></article>`;
+}
+
+function copyTextCard([label, body], className = "technical-card") {
+  return `<article class="${className}"><strong>${label}</strong><p>${body}</p></article>`;
 }
 
 function setupCanvas(canvas) {
@@ -750,9 +1032,10 @@ function renderReport() {
   const html = `
     <h1>${p.company} (${state.ticker}) Hawk Report</h1>
     <p><strong>Recommendation:</strong> ${state.rating} | <strong>Score:</strong> ${state.score}/100 | <strong>Most recent price:</strong> ${money(state.currentPrice)}</p>
+    <p><strong>Score model:</strong> Performance ${state.scoreBreakdown.performance}/100, risk ${state.scoreBreakdown.risk}/100, fundamentals ${state.scoreBreakdown.fundamentals}/100, technicals ${state.scoreBreakdown.technical}/100, and efficiency ${state.scoreBreakdown.efficiency}/100.</p>
     <h2>1. Company Introduction</h2>
     <p>${p.description}</p>
-    <p><strong>Top competitors:</strong> ${p.competitors.join(", ")}.</p>
+    <p><strong>Top competitors:</strong> ${competitorNames(p.competitors).join(", ")}${p.competitorSource ? ` (${p.competitorSource})` : ""}.</p>
     <p><strong>Revenue breakdown:</strong> ${p.revenue.map(([name, value]) => `${name} ${pct(value)}`).join("; ")}.</p>
     <p><strong>Yahoo Finance chart:</strong> ${state.yahoo?.yahooUrl || `https://finance.yahoo.com/quote/${state.ticker}/chart/`}</p>
     <h2>2. Data Analysis Results</h2>
@@ -861,7 +1144,8 @@ function reportDataForPrompt() {
     ticker: state.ticker,
     company: state.profile.company,
     description: state.profile.description,
-    competitors: state.profile.competitors,
+    competitors: competitorNames(state.profile.competitors),
+    competitorResearch: state.profile.competitorResearch || [],
     currentPrice: state.currentPrice,
     stockReturn: state.stockReturn,
     marketReturn: state.marketReturn,
@@ -875,6 +1159,7 @@ function reportDataForPrompt() {
     resistance: state.resistance,
     rating: state.rating,
     score: state.score,
+    scoreBreakdown: state.scoreBreakdown,
     ratios: state.profile.ratios,
     yahooFinanceChart: state.yahoo?.yahooUrl || `https://finance.yahoo.com/quote/${state.ticker}/chart/`
   };
@@ -886,9 +1171,9 @@ async function generateAiContent() {
   const model = localStorage.getItem(OPENAI_MODEL) || "gpt-4.1-mini";
   const snapshot = JSON.stringify(reportDataForPrompt(), null, 2);
   try {
-    setText("company-overview", "AI is writing a 3 sentence overview...");
+    setText("company-description", "AI is writing a 3 sentence overview...");
     const overview = await callOpenAI(model, key, `Write exactly 3 beginner-friendly sentences overviewing this stock for a student investment report. Use only the supplied data and avoid investment advice language.\n\nDATA:\n${snapshot}`);
-    if (overview) setText("company-overview", overview.replace(/\s+/g, " ").trim());
+    if (overview) setText("company-description", overview.replace(/\s+/g, " ").trim());
 
     el("report-preview").innerHTML = '<p class="muted">AI is writing the detailed Hawk Report...</p>';
     const report = await callOpenAI(model, key, `Write a detailed Hawk Report as safe HTML using only h1, h2, h3, h4, and p tags. Base the structure on this template: 1 Company Introduction; revenue breakdown; 2 Data Analysis Results; 2.1 Quantitative Analysis covering 5-year returns, volatility/standard deviation, covariance/correlation, CAPM beta, weak-form market efficiency; 2.2 Fundamental Analysis covering ratio analysis, valuation, bond/yield spread; 2.3 Technical Analysis covering SMA, RSI, support, resistance; 3 Conclusion. Mention the Yahoo Finance chart link as the source for market chart imagery. Make it beginner-friendly but detailed, similar to a student Hawk Report.\n\nDATA:\n${snapshot}`);
@@ -1172,6 +1457,8 @@ function loadApiSettings() {
   el("alpha-vantage-key").value = localStorage.getItem(ALPHA_VANTAGE_KEY) || "";
   el("newsdata-key").value = localStorage.getItem(NEWSDATA_KEY) || "";
   el("unsplash-key").value = localStorage.getItem(UNSPLASH_KEY) || "";
+  el("google-search-key").value = localStorage.getItem(GOOGLE_SEARCH_KEY) || "";
+  el("google-search-cx").value = localStorage.getItem(GOOGLE_SEARCH_CX) || "";
   el("news-refresh-minutes").value = String(getNewsRefreshMinutes());
   updateTickerHistoryUI();
 }
@@ -1182,6 +1469,8 @@ function saveApiSettings() {
   localStorage.setItem(ALPHA_VANTAGE_KEY, el("alpha-vantage-key").value.trim());
   localStorage.setItem(NEWSDATA_KEY, el("newsdata-key").value.trim());
   localStorage.setItem(UNSPLASH_KEY, el("unsplash-key").value.trim());
+  localStorage.setItem(GOOGLE_SEARCH_KEY, el("google-search-key").value.trim());
+  localStorage.setItem(GOOGLE_SEARCH_CX, el("google-search-cx").value.trim());
   localStorage.setItem(SHOW_TICKER_HISTORY, String(el("show-ticker-history").checked));
   const refreshMinutes = Math.max(1, Math.min(240, Number(el("news-refresh-minutes").value) || 30));
   localStorage.setItem(NEWS_REFRESH_MINUTES, String(refreshMinutes));
@@ -1199,7 +1488,7 @@ async function loadFinancialNews(ticker, companyName) {
   const carousel = el("news-carousel");
   if (!carousel) return;
   if (!newsKey) {
-    renderNewsSlides([{ title: "Add a NewsData.io key to load recent financial headlines.", description: "The news report section will slide through headlines for the analyzed stock.", link: "", image: "" }]);
+    renderNewsSlides(fallbackNewsSlides(ticker, companyName, "Add a NewsData.io key in Settings for live recent headlines."));
     return;
   }
 
@@ -1214,10 +1503,59 @@ async function loadFinancialNews(ticker, companyName) {
       link: article.link || "",
       image: article.image_url || await fetchUnsplashImage(`${companyName} stock market`)
     })));
-    renderNewsSlides(slides.length ? slides : [{ title: "No recent headlines returned.", description: "Try another ticker or check your NewsData.io plan.", link: "", image: "" }]);
+    renderNewsSlides(slides.length ? slides.map((slide, index) => ({
+      ...slide,
+      image: slide.image || fallbackNewsImage(ticker, slide.title, index)
+    })) : fallbackNewsSlides(ticker, companyName, "NewsData.io did not return recent headlines for this ticker."));
   } catch (error) {
-    renderNewsSlides([{ title: "Could not load financial news.", description: error.message, link: "", image: "" }]);
+    renderNewsSlides(fallbackNewsSlides(ticker, companyName, `Live news could not load: ${error.message}`));
   }
+}
+
+function fallbackNewsSlides(ticker, companyName, note) {
+  const yahooNews = `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/news/`;
+  const slides = [
+    {
+      title: `${companyName} (${ticker}) market snapshot`,
+      description: `${note} Review the latest price trend, risk score, and recommendation while live headlines refresh.`,
+      link: yahooNews
+    },
+    {
+      title: `${ticker} valuation and fundamentals watch`,
+      description: "Use the ratio cards and Hawk Report to compare profitability, growth, leverage, and valuation before reading outside research.",
+      link: yahooNews
+    },
+    {
+      title: `${ticker} technical trend check`,
+      description: "The chart section updates moving averages, RSI, support, and resistance from the analyzed ticker's price history.",
+      link: yahooNews
+    }
+  ];
+  return slides.map((slide, index) => ({
+    ...slide,
+    image: fallbackNewsImage(ticker, slide.title, index)
+  }));
+}
+
+function fallbackNewsImage(ticker, title, index) {
+  const palettes = [
+    ["#0f766e", "#f59e0b", "#eff6ff"],
+    ["#2563eb", "#16a34a", "#f8fafc"],
+    ["#7c3aed", "#f97316", "#fdf2f8"]
+  ];
+  const [primary, accent, background] = palettes[index % palettes.length];
+  const safeTicker = xmlEscape(String(ticker).slice(0, 8));
+  const safeTitle = xmlEscape(String(title).slice(0, 54));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+    <rect width="720" height="420" fill="${background}"/>
+    <path d="M0 320 C120 240 170 280 260 205 C350 130 420 180 510 92 C585 20 640 38 720 8 L720 420 L0 420 Z" fill="${primary}" opacity=".14"/>
+    <path d="M68 298 L198 236 L310 258 L438 154 L604 184" fill="none" stroke="${primary}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="604" cy="184" r="24" fill="${accent}"/>
+    <rect x="58" y="54" width="172" height="58" rx="12" fill="${primary}"/>
+    <text x="84" y="94" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700" fill="#fff">${safeTicker}</text>
+    <text x="58" y="366" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700" fill="#111827">${safeTitle}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 async function fetchUnsplashImage(query) {

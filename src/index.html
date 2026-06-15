@@ -89,7 +89,6 @@
               <div>
                 <h2 id="company-name">Enter a ticker to begin</h2>
                 <p id="company-description">The app will analyze the stock symbol you enter and generate charts, beginner explanations, and a DOCX report.</p>
-                <p id="company-overview" class="company-overview">Company and fund overviews appear here after analysis.</p>
                 <p id="competitors" class="competitors">Top competitors will appear here.</p>
               </div>
               <div class="score-ring">
@@ -241,6 +240,8 @@
           <label>Alpha Vantage API Key<input id="alpha-vantage-key" type="password" placeholder="Optional fundamentals backup" /></label>
           <label>NewsData.io API Key<input id="newsdata-key" type="password" placeholder="Required for financial news" /></label>
           <label>Unsplash Access Key<input id="unsplash-key" type="password" placeholder="Optional news image fallback" /></label>
+          <label>Google Search API Key<input id="google-search-key" type="password" placeholder="Optional competitor research" /></label>
+          <label>Google Search Engine ID<input id="google-search-cx" type="text" placeholder="Programmable Search Engine cx" /></label>
         </div>
         <button id="save-api-keys" type="button" class="secondary">Save Settings</button>
         <p id="api-status" class="muted">Keys are saved locally in this app profile. Yahoo Finance data powers charts; OpenAI writes the overview and Hawk Report when configured. News refreshes automatically using the interval above.</p>

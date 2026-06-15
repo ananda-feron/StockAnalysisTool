@@ -55,7 +55,9 @@ function registerApiHandlers() {
     "www.alphavantage.co",
     "newsdata.io",
     "api.unsplash.com",
-    "api.openai.com"
+    "api.openai.com",
+    "customsearch.googleapis.com",
+    "www.googleapis.com"
   ]);
 
   ipcMain.handle("api:fetchJson", async (_event, request) => {
