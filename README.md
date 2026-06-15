@@ -4,6 +4,8 @@ A beginner-friendly stock analysis desktop app inspired by SUNY New Paltz Hawk F
 
 ## Purpose
 
+The goal of this app is to help students more easily understand the research process and produce Hawk-style reports in a digestible format.
+
 As a former Student Stock Analyst for the SUNY New Paltz Hawk Fund, I was inspired by the stock analysis reports I created to assist the club's investment decisions that were made on behalf of the school. Each report required:
 
 - Selecting a stock or ETF
@@ -13,7 +15,9 @@ As a former Student Stock Analyst for the SUNY New Paltz Hawk Fund, I was inspir
 - Synthesizing findings
 - Making a recommendation
 
-The goal of this app is to help students more easily understand the research process and produce Hawk-style reports in a digestible format.
+## Preview
+
+<img width="1464" height="779" alt="Screenshot 2026-06-15 at 2 48 59 PM" src="https://github.com/user-attachments/assets/a97129a1-ef73-40d7-95e4-13052aab2af8" />
 
 ## Current Features
 
@@ -114,5 +118,3 @@ The tests include:
 - The recommendation score is educational and should not be treated as financial advice.
 - The app is designed for beginner-friendly learning and report drafting.
 - Users should verify important financial data with official filings, issuer pages, and licensed market-data providers before making real investment decisions.
-
-<br><img width="1467" height="874" alt="Hawk Fund Stock Analyzer screenshot" src="https://github.com/user-attachments/assets/71f1e5cc-d0a1-4eaa-a076-9a47db59c82c" />
